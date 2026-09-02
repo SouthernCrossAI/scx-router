@@ -52,10 +52,6 @@ print(scores[0])
 CUDA is used when available, followed by Apple MPS and then CPU. Override this
 with `SCXRouter(device="cpu")` or the CLI's `--device` option.
 
-## Examples
-
-- [Use SCX Router in OpenCode](examples/opencode/)
-
 ## Paper
 
 [SCX Router: Streaming Zero-Shot Model Selection with a Decoder-KV Classifier and a Real-World Task Ontology](paper/SCX_Model_Router.pdf)
