@@ -1,56 +1,78 @@
 # SCX Router
 
-A minimal Python component for ranking candidate LLMs with
-[SCX Router v0.1](https://huggingface.co/scx-admin/scx-router-v0.1).
+A lightweight GLiClass-based model router that ranks candidate LLMs in one
+non-generative pass. Candidate labels can be changed at inference time.
 
-The model is a 0.6B-parameter, GLiClass-based zero-shot router. It scores all
-candidates in one non-generative pass, so the candidate list can be changed at
-inference time.
+[Hugging Face model](https://huggingface.co/scx-admin/scx-router-v0.1) ·
+[Paper](paper/SCX_Model_Router.pdf)
 
 ## Install
 
-Python 3.10 or newer is required.
-
 ```bash
-git clone https://github.com/SouthernCrossAI/scx-router.git
-cd scx-router
-python -m venv .venv
-source .venv/bin/activate
-pip install .
+pip install gliclass -U
 ```
 
 The checkpoint is downloaded from Hugging Face on first use.
 
-## Use
-
-From the command line:
-
-```bash
-scx-router "Write a Python function that merges two sorted linked lists."
-```
-
-With your own candidate models:
-
-```bash
-scx-router "Summarize this contract." \
-  --labels fast-model balanced-model accurate-model \
-  --top-k 2
-```
-
-From Python:
+## Single input
 
 ```python
-from scx_router import SCXRouter
+from gliclass import GLiClassModel, ZeroShotClassificationPipeline
+from transformers import AutoTokenizer
 
-router = SCXRouter()
-scores = router.rank(
-    "Write a Python function that merges two sorted linked lists."
+model_path = "scx-admin/scx-router-v0.1"  # or a local path to this checkpoint
+
+model = GLiClassModel.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+pipeline = ZeroShotClassificationPipeline(
+    model, tokenizer, classification_type="multi-label", device="cuda:0"
 )
-print(scores[0])
+
+text = "Write a Python function that merges two sorted linked lists."
+labels = [
+    "coder", "DeepSeek-V3.1", "gemma-4-31B-it", "gpt-oss-120b",
+    "Llama-4-Maverick-17B-128E-Instruct", "MAGPiE",
+    "Meta-Llama-3.3-70B-Instruct", "Qwen3-32B",
+]
+
+for r in pipeline(text, labels, threshold=0.5)[0]:
+    print(r["label"], "=>", round(r["score"], 3))
 ```
 
-CUDA is used when available, followed by Apple MPS and then CPU. Override this
-with `SCXRouter(device="cpu")` or the CLI's `--device` option.
+Use `device="cpu"` on a CPU-only machine.
+
+## Streamed input
+
+Using the same `model_path` and `labels`:
+
+```python
+from gliclass import GLiClassModel, StreamingZeroShotClassificationPipeline
+from transformers import AutoTokenizer
+
+model = GLiClassModel.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+router = StreamingZeroShotClassificationPipeline(
+    model, tokenizer, classification_type="multi-label", device="cuda:0"
+)
+
+session_id = "chat-42"
+turns = [
+    "I need help refactoring some Rust code.",
+    "Specifically the borrow checker keeps rejecting this function.",
+    "fn parse(&mut self, buf: &[u8]) -> Result<Token, Error> { ... } -- here's the body.",
+]
+
+for turn in turns:
+    out = router(turn, labels, session_ids=session_id, threshold=0.5)[0]
+    print(f"+{out['tokens_added']} new tokens -> cache now {out['cached_length']} tokens")
+    if out["triggered"]:
+        for pred in sorted(out["predictions"], key=lambda p: -p["score"]):
+            print(f"  {pred['label']:<38s} {pred['score']:.3f}")
+
+# only each turn's own tokens are encoded -- earlier turns stay in the KV cache
+```
 
 ## Examples
 
